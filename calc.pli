@@ -1,0 +1,114 @@
+calc: package;	
+/********************************************************************************************/
+/*	                           MAIN - MAIN PROCEDURE OF THE PROGRAM                     */     
+/* CALLS:                                                                                   */
+/*  GET_INPUT_DATA PROCEDURE                                                                */
+/*  X                                                                                       */
+/*  Y                                                                                       */
+/*  Z                                                                                       */
+/*                                                                                          */
+/*                                                                                          */
+/********************************************************************************************/
+/* GLOBAL VARIABLES */
+      declare first_operand 	fixed decimal(10,2);
+      declare second_operand 	fixed decimal(10,2);
+      declare operation 	char(1);      
+/*    should calculation be performed ? Y - Yes, N - No. flag set in program                 */      
+      declare isOk 		char(1) init("Y");  
+/*    should test messages be displayed? Y - Yes, N - No                                     */      
+      declare isItTest 	char(1) value("Y"); 
+      declare flagIsOk 	char(1) value("Y");
+      declare flagIsNotOk 	char(1) value("N");
+      main: proc options(main);
+	declare result fixed decimal(10,2);
+      	call get_input_data;
+      	if isOk = flagIsOk then      	
+      	  do;
+     	  	result =  calculate(first_operand,second_operand,operation);     	
+     		put skip list("your result is " || result);
+          end;
+        else
+          do;
+          	put skip list("calculation could not be performed");
+          end;		
+      end main;
+
+/********************************************************************************************/
+/*                                     GET_INPUT_DATA   (PROCEDURE)                         */
+/* GET INPUT DATA FROM THE USER                                                             */
+/* PROCEDURE OPERATES ON THE GLOBAL VARIABLES                                               */
+/********************************************************************************************/
+      get_input_data: proc;
+/* without the line below program will not write the messages to the user correctly      	*/
+      	declare sysprint file output stream environment(interactive);
+     	put skip list("please provide first operand: "); 
+/* get first operand from the user      	*/
+      	get list(first_operand);
+
+      	put skip list("please provide second operand:");
+	get list(second_operand);
+	put skip list("please provide operation code +,-,/,*");
+	get list(operation);
+	if ^(operation = "+" 
+	   | operation = "-"
+	   | operation = "*"
+	   | operation = "/") then
+	  do;
+		put skip list("operation code provided is invalid");	  
+		isOk = flagIsNotOk;
+	  end;
+	
+/*      print debugging messages if needed*/	
+	if isItTest = flagIsOk then
+	  do;
+		put skip data(second_operand);
+		put skip data(first_operand);	      		
+		put skip data(operation);
+      	  end;
+      	  
+      end get_input_data;      
+/********************************************************************************************/
+/*                                       CALCULATE    (FUNCTION)                            */
+/* EXECUTE BASIC OPERATIONS SUCH AS:                                                        */
+/*  ADDITION                                                                                */
+/*  SUBTRACTION                                                                             */
+/*  MULTIPLICATION                                                                          */
+/*  DIVISION                                                                                */
+/********************************************************************************************/      
+      calculate: proc(A,B,OP) returns(fixed decimal(10,2));
+      	declare A fixed decimal(10,2);
+      	declare B fixed decimal(10,2);      	 
+      	declare OP char(1);
+	declare RESULT fixed decimal(10,2) init(0);
+	select;
+		when (OP = "+");
+		  do;
+			return(A+B);
+	          end;
+		when (OP = "-");
+		  do;
+			return(A-B);
+	          end;
+		when (OP = "/");
+		  do;
+		  	if B = 0 then
+		  	  do;
+			    put skip list("you cannot perform such operation, zero is returned");
+			    return(0);
+			  end;
+			else
+			  do;
+                	    return(A/B);
+			  end;
+		  end;
+		when (OP = "*");
+		  do;
+			return(A*B);
+		  end;
+		otherwise;
+		  do;
+			put skip list("invalid operation code internal error");
+	          end;
+	end;
+      end calculate;
+end calc;	
