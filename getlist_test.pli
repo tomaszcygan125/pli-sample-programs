@@ -1,0 +1,9 @@
+mypkg: package;
+/* this program works correcly A,B,C,D,E are defined as floating point*/
+	myproc: proc options(main);
+		declare sysprint file output stream environment(interactive);
+		put list("podaj dane: ");
+		get list(A,B,C,D,E);
+		put data(A,B,C,D,E);
+	end myproc;
+end mypkg;
