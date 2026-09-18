@@ -1,0 +1,66 @@
+MAIN: PROC OPTIONS(MAIN);
+   DECLARE TABL1(10)      CHAR(35);
+   DECLARE TAGS(10)       FIXED BIN(31);
+   DECLARE FINPUT         FILE RECORD INPUT;
+   DECLARE INFILE_REC     CHAR(35);
+   DECLARE JX             FIXED BIN(31);
+   DECLARE NO$            BIT(1) INIT('0'B);
+   DECLARE YES$           BIT(1) INIT('1'B);
+   DECLARE TEMP           FIXED BIN(31);
+   OPEN FILE(FINPUT);
+   DO JX=1 TO 10;
+      READ FILE(FINPUT) INTO(INFILE_REC);
+      TABL1(JX) = INFILE_REC;
+   END;
+   DO JX =1 TO 10;
+      PUT SKIP LIST('RECORD: ' || TABL1(JX));
+   END;
+   CLOSE FILE(FINPUT);
+   CALL SETTAGS;
+
+   CALL SORTEX;
+
+   CALL CHKSORT;
+
+   PUT SKIP LIST('END OF PROGRAM');
+
+   /*                    INTERNAL PROCEDURES                    */
+
+   /* SET TAGS() TABLE TO 1,2,3,5, ....                          */
+   SETTAGS: PROC;
+
+      PUT SKIP LIST('INSIDE SETTAGS');
+      DO JX=1 TO 10;
+         TAGS(JX) = JX;
+      END;
+   END SETTAGS;
+   /*   EXCHANE SORT IMPLEMENTATION, ORDER OF ELEMENTS IN THE ARRAY          */
+   /*   DOES NOT CHANGE, WHAT CHANGES IS TAGS ARRAY WHICH STORES THE         */
+   /*   ORDER OF INDEXES IN SORTED MANNER                                    */
+   SORTEX: PROC;
+      PUT SKIP LIST('INSIDE SORTEX');
+      DECLARE SORTED BIT(1) INIT('0'B);
+      DECLARE EXCHANGED BIT(1) INIT('0'B);
+      DO UNTIL(SORTED);
+         EXCHANGED = NO$;
+         DO JX = 1 TO 9;
+            IF TABL1(TAGS(JX)) > TABL1(TAGS(JX+1)) THEN
+               DO;
+                  TEMP           = TAGS(JX);
+                  TAGS(JX)       = TAGS(JX+1);
+                  TAGS(JX+1)     = TEMP;
+                  EXCHANGED      = YES$;
+
+               END;
+         END;
+         IF ¬EXCHANGED THEN
+            SORTED = YES$;
+      END;
+   END SORTEX;
+   CHKSORT: PROC;
+      PUT SKIP LIST('AFTER SORTING');
+      DO JX =1 TO 10;
+         PUT SKIP LIST('RECORD: ' || TABL1(TAGS(JX)));
+      END;
+   END CHKSORT;
+END MAIN;
