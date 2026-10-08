@@ -1,0 +1,34 @@
+/* TEST OF CONTROLLED STORAGE                         */
+/* PROGRAM GOAL IS TO CREATE A STACK PUT A UNIQUE     */
+/* VALUES IN EACH GENERATION IN STACK                 */
+/* AND TO PRINT ALL THE VALUES TO THE USER            */
+
+main: proc options(main);
+ /* note: 'snap' adds trace back' */
+    on error snap begin;	  
+	on error system; 
+	put skip list('ERROR IS ERRORING');
+	put skip list('on code: ' || oncode);
+	put skip list('on loc: ' || onloc);        
+    end;	
+    
+    declare sample char(30) controlled;
+    allocate sample;	
+    sample = 'ONE TWO THREE';
+   
+    do i =1 to 10;
+      allocate sample;
+      sample = 'ONE TWO THREE ' || i;
+    end;
+    call secproc;
+    
+    /*     print all stack from sample   */ 
+    secproc: proc;
+    	
+    do while (allocation(sample) > 0);
+    	put skip list("sample: " || sample);
+    	free sample;
+    end;
+    end secproc;
+	
+end main;
