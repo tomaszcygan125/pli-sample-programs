@@ -1,0 +1,187 @@
+
+
+/* this program shows basics functions of list implemented in PL/I language  */ 
+/* additional notes:								*/
+/*   in future function of deleting exiting list elements should be 	 	*/
+/*   implemented 						     	       */
+main: proc options(main);
+
+	on error begin; 
+		on error system; 
+		put skip list('error encountered');
+		put skip list('onloc: ' || onloc);
+		put skip list('oncode: ' || oncode);
+		put skip list('end of program due to error ');
+	end;
+
+	declare ptr pointer;
+	declare head pointer;
+	declare current pointer;
+	declare null builtin;
+	declare result fixed bin(31);
+	
+	declare 1 node based(ptr),
+		2 name char(20),
+		2 nextptr pointer;
+	
+	allocate node set(ptr); 
+	
+	head = ptr;  /* head stores address of the first element */ 
+	
+	
+	node.name ='mark';
+	
+	node.nextptr = null; 
+	
+	call addNewElement('tomas');
+	call addNewElement('michael');
+	call addNewElement('final element');	
+
+
+	
+	/* lets search for michael element */ 
+	
+	result = searchList('michael');
+	if result = -1 then 
+		put skip list('list element could not be located');
+	else 
+		put skip list('list element located, index: ' || result);
+	
+	call addNewElement('atomas');
+	call addNewElement('cmichael2');
+	call addNewElement('xfinal element2');	
+	call addNewElement('magda');
+	call addNewElement('ryszard');
+	call addNewElement('charizard');	
+	call addNewElement('harry potter');
+	call addNewElement('barry alen');
+	call addNewElement('willy wonka');	
+	call printAllListElements();
+	
+	call sortList();
+	put skip list('after sorting');
+	call printAllListElements();
+	
+	
+	
+	/*  add New element to the list (first element has to be already created) */ 
+	addNewElement: proc(input_name);	
+		
+		declare input_name char(20);
+		
+		current = head; /* set current pointer to start of the list */
+		
+		do while(current->node.nextptr ^= null);
+    			/* set current to the next element */ 
+			current  = current->node.nextptr; 
+		end;
+		
+		allocate node set(ptr);
+		
+		current->node.nextptr  = ptr; /* previous needs to point to new element */ 
+
+		ptr->node.name = input_name; /* set name */ 
+		ptr->node.nextptr = null; 
+		
+		put skip list('new element has been added'); 				
+		
+	end addNewElement;	 	
+	
+	
+	/* print all elements from the list */ 
+	printAllListElements: proc;	
+		current  = head; /*set current to the first element */ 
+		declare inx fixed bin(15)  init(1); /* element counter, to be incremented in every loop iteration*/
+		
+		/* print all elements in the list */
+		do until(current = null);
+			put skip list('element no: ' || 
+			                         inx || 
+			                   ' name: ' || 
+			          current->node.name  );
+			current = current->node.nextptr;
+			inx = inx + 1;
+		end; 
+		put skip list('at end of printAllListElements');
+	end;
+	
+	/* locate an element in a list (linear search) */ 	
+	searchList: proc(search_name) returns(fixed bin(31);
+
+		declare search_name char(20); 
+		declare inx fixed bin(31) init(1);
+
+		if   search_name = ' ' then
+		do;
+			put skip list('invalid search name');
+			return(-1); 	
+		end;
+
+		current = head; /* start from the first element */ 
+		
+		do until(current = null); 
+			
+			if current->node.name = search_name then
+				return(inx);
+						
+			current = current->node.nextptr;
+			inx = inx + 1;
+		end;
+		
+	end searchList; 
+	
+	/* this procedure implements insertion sort algorithm */ 
+	sortList: proc ;
+	 	declare sorted   pointer;   /* head of the sorted list */
+		declare unsorted pointer;   /* next node to take from the old list */
+		declare nxt      pointer;   /* saved link to the rest of the old list */
+		declare p        pointer;   /* walker over the sorted list */
+		declare done     bit(1);
+
+		sorted   = null;
+		unsorted = head;
+
+		do while(unsorted ^= null);
+
+			nxt = unsorted->node.nextptr;   /* remember the rest before relinking */
+
+			if sorted = null then
+			do;
+				/* sorted list is empty: node becomes its only element */
+				unsorted->node.nextptr = null;
+				sorted = unsorted;
+			end;
+			else if unsorted->node.name < sorted->node.name then
+			do;
+				/* node is smaller than the first one: insert at the front */
+				unsorted->node.nextptr = sorted;
+				sorted = unsorted;
+			end;
+			else
+			do;
+				/* find the last node that is <= the inserted one */
+				p = sorted;
+				done = '0'b;
+				do while(^done);
+					if p->node.nextptr = null then
+						done = '1'b;
+					else if p->node.nextptr->node.name > unsorted->node.name then
+						done = '1'b;
+					else
+						p = p->node.nextptr;
+				end;
+
+				/* insert after p */
+				unsorted->node.nextptr = p->node.nextptr;
+				p->node.nextptr = unsorted;
+			end;
+
+			unsorted = nxt;   /* take the next node from the old list */
+		end;
+
+		head = sorted;   /* the list now starts from the sorted head */
+
+		put skip list('list has been sorted');
+		
+	end sortList;
+end main;
