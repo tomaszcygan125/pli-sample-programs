@@ -1,0 +1,1413 @@
+MAIN: PROC OPTIONS(MAIN);
+
+
+/*--------------------------------------data-declaration--------------------------------------------------*/			
+	
+	
+      	DECLARE USER_VERIFIED 				BIT(1) INIT('0'B); /* If user has been correctly authorized */
+		
+	DECLARE YES$ 					BIT(1) INIT('1'B);
+	DECLARE NO$ 					BIT(1) INIT('0'B);
+	DECLARE ADMIN_ACCOUNT$                        CHAR(1) INIT('A');   
+	DECLARE USER_ACCOUNT$				CHAR(1) INIT('N');        
+ 	DECLARE BLOCKED_ACCOUNT$                     	CHAR(1) INIT('B');
+ 	DECLARE USER_NOT_BLOCKED$ 			CHAR(1) INIT('_');
+	DECLARE IF_TEST_RUN 				BIT(1) INIT('1'B);
+	DECLARE USER_ACCOUNT_EXISTS			CHAR(1) INIT(' ');
+	
+
+	DECLARE GLB_USER_LOGIN 			CHAR(40);  
+	DECLARE GLB_USER_ACCOUNT_TYPE 		CHAR(1); 
+	DECLARE GLB_USER_ACCOUNT_BLOCKED_FLAG 	CHAR(1);
+	DECLARE GLB_USER_ACCOUNT_MESSAGE 		CHAR(38);
+	DECLARE GLB_MAX_USER_COUNT                    FIXED BIN(31) INIT(1000);
+	DECLARE GLB_MAX_SPOT_NUMBER			FIXED BIN(31) INIT(20);
+	DECLARE GLB_MAX_RESERVATION_DURATION        	FIXED BIN(31) INIT(50); 
+	 
+	DECLARE MSG_USER_NOT_FOUND 			CHAR(100) INIT('Provided data dont allow for correct authorization!');
+	DECLARE MSG_USER_TYPE_INVALID 		CHAR(100) INIT("Internal error provided users user type invalid!");
+	DECLARE MSG_PROGRAM_END                    	CHAR(30)  INIT('Program termination');
+	DECLARE MSG_INVALID_USER_CHOICE           	CHAR(100) INIT('Invalid choice provided');
+	DECLARE MSG_ERR_OLD_AND_NEW_PASSWORD_EQUAL	CHAR(100) INIT('Old and new passwords are the same, please repeat');
+	DECLARE MSG_ERR_PASSWORD_INVALID          	CHAR(100) INIT('Old or new password is invalid');
+	DECLARE MSG_PASS_CHANGE_FAIL_USER_NFND        CHAR(100) INIT('Password change failed, old password is incorrect, try again');
+	DECLARE MSG_LOGIN_DATA_UPDATED_CORRECT        CHAR(100) INIT('Login data correctly updated');
+	DECLARE MSG_USER_EXISTS_TRY_LOGGING 		CHAR(100) INIT('This user name already exsits, try logging in');
+	DECLARE MSG_NEW_ACCOUNT_ADDED 		CHAR(100) INIT('New account has been added, please log in ');
+	DECLARE MSG_BEFORE_MARKETPLACE_LAYOUT       	CHAR(100) INIT('Below we present you with layout of our local marketplace');
+	DECLARE MSG_BEFORE_MARKETPLACE_SPOTS       	CHAR(100) INIT('Below we present you with basic information about each spot');
+	DECLARE MSG_CONVERSION_ERROR               	CHAR(100) INIT('Conversion error, please try again.');
+	DECLARE MSG_DURATION_TO_LONG                	CHAR(100) INIT('Change dates, duration of reservation is too long');
+	DECLARE MSG_INVALID_DATES_PROVIDED         	CHAR(100) INIT('Invalid dates provided!');
+	DECLARE MSG_INVALID_SPOT_NUMBER             	CHAR(100) INIT('Invalid spot number provided!');
+	DECLARE MSG_RESERVATION_CONFLICT             	CHAR(100) INIT('Your reservation overlaps with existsing reservation, try again');
+	DECLARE MSG_INVALID_RESV_OPTION               CHAR(100) INIT('Invalid option provided, please try again');
+	DECLARE MSG_RESRV_NOT_FOUND                 	CHAR(100) INIT('Reservation not found, please try again');
+	DECLARE MSG_SUCCESSFUL_CANCELATION          	CHAR(100) INIT('Successful reservation cancelation');
+/*-------------------------------end-of-data-declaration--------------------------------------------------*/	
+
+
+
+	ON ERROR BEGIN;
+		ON ERROR SYSTEM;
+		DISPLAY('ONLOC: ' || ONLOC);
+		DISPLAY('ONCODE: = ' || ONCODE);
+		DISPLAY('ONfile: = ' || ONFILE);
+
+	END;		
+
+	/*                                   MAIN LOGIN                                                   */
+	CALL WRITE_FIRST_SCREEN();
+
+	DISPLAY('Do you have an account in our system? (Y/N): ') REPLY(USER_ACCOUNT_EXISTS);
+	DO WHILE(USER_ACCOUNT_EXISTS = ' ');
+		DISPLAY('') REPLY(USER_ACCOUNT_EXISTS);
+	END;
+
+	IF(USER_ACCOUNT_EXISTS ^= 'y'
+	  & USER_ACCOUNT_EXISTS ^= 'Y') THEN
+	DO;
+	   CALL CREATE_A_NEW_USER_ACCOUNT();
+	   
+	END;
+
+
+	/* Here user account exists for sure, so program asks for credentials */
+	DO UNTIL(USER_VERIFIED);
+	  	CALL GET_VALIDATE_CREDENTIALS();
+	END;
+	/* check for the account blockade */ 
+	
+	IF (GLB_USER_ACCOUNT_BLOCKED_FLAG = BLOCKED_ACCOUNT$) THEN
+	DO;
+		DISPLAY('Unfortunately you dont have the access to this system');
+		DISPLAY('Your account: ' 
+			|| GLB_USER_LOGIN 
+			|| ' has been blocked with message: ' 
+			|| GLB_USER_ACCOUNT_MESSAGE);
+		RETURN;
+	END;
+	
+
+
+  	
+
+	SELECT (GLB_USER_ACCOUNT_TYPE);
+		WHEN (ADMIN_ACCOUNT$)
+			CALL ADMIN_USER_PROCESSING;
+		WHEN (USER_ACCOUNT$)
+		DO;			
+			CALL NORMAL_USER_PROCESSING;
+		END;
+		OTHERWISE
+			DISPLAY(MSG_USER_TYPE_INVALID);
+ 	END;			
+	
+	
+	DISPLAY(MSG_PROGRAM_END);
+
+	
+	/*   END OF MAIN PROCEDURE                                                                        */
+	
+	
+	/*------------------------------------------------------------------------------*/
+	/*                                                                              */
+	/*  Write first screen to user                                                  */
+	/*                                                                              */
+	/*------------------------------------------------------------------------------*/	
+	WRITE_FIRST_SCREEN: PROC;
+              	DISPLAY((100)'-');
+ 		DISPLAY((30)' ' || 'Welcome in market place reservation system !');
+		DISPLAY((40)' ' || 'Authorized access only!!');
+		DISPLAY((100)'-');				
+	END WRITE_FIRST_SCREEN;
+	
+	/*------------------------------------------------------------------------------*/
+	/* SUBPROCEDURE THAT ASK USER TO PROVIDE NEW LOGIN AND PASSWORD AND CREATES     */
+	/* A NEW ACCOUNT					                          */
+	/*------------------------------------------------------------------------------*/	
+	CREATE_A_NEW_USER_ACCOUNT: PROC;
+	     DECLARE USER_LOGIN CHAR(40) INIT(' ');
+	     DECLARE USER_PASSWORD CHAR(30) INIT(' ');
+	     DECLARE LOGIN_DATA_CORRECT BIT(1) INIT('0'B); 
+	     
+	     DECLARE USER_EXISTS  BIT(1) INIT('0'B);
+	     DECLARE 1 LOGIN_INPUT_STRUCTURE,
+		 	   2 LOGIN_LOGIN CHAR(40),
+		 	   2 LOGIN_PASSWORD CHAR(30),
+		 	   2 LOGIN_ACCOUNT_TYPE CHAR(1),
+		 	   2 LOGIN_ACCOUNT_BLOCKED CHAR(1),
+		 	   2 LOGIN_ACCOUNT_MESSAGE CHAR(38);
+		 	   
+	     DO UNTIL(LOGIN_DATA_CORRECT);     
+		     
+		     DISPLAY('Please provide your login: ') REPLY(USER_LOGIN);
+		     
+		     DO WHILE(USER_LOGIN = ' ');
+			        DISPLAY('') REPLY(USER_LOGIN);
+		     END;
+		     
+		     DISPLAY('Please provide your password: ')  REPLY(USER_PASSWORD);
+		     DO WHILE(USER_PASSWORD = ' ');
+			        DISPLAY('') REPLY(USER_PASSWORD);
+		     END;
+		     
+		     IF (USER_LOGIN ^= ' ' 
+		       & USER_LOGIN ^= 'X'
+		       & USER_LOGIN ^= 'x'
+		       & USER_PASSWORD ^= ' ') THEN
+		         LOGIN_DATA_CORRECT = YES$;
+		     ELSE
+		     	DISPLAY('User login or user password is invalid, try again');
+	     END;
+	     
+	     
+	     USER_EXISTS = CHECK_IF_USER_EXISTS(USER_LOGIN);
+	     
+	     IF (USER_EXISTS) THEN
+	     DO;
+	     	DISPLAY(MSG_USER_EXISTS_TRY_LOGGING);
+	     	STRING(lOGIN_INPUT_STRUCTURE) = ' '; /* INITIALIZE THE STRUCTURE */
+	     	RETURN;
+	     END;
+	     
+	     LOGIN_LOGIN = USER_LOGIN;
+	     LOGIN_PASSWORD = USER_PASSWORD;
+	     LOGIN_ACCOUNT_TYPE = USER_ACCOUNT$;
+	     LOGIN_ACCOUNT_BLOCKED = USER_NOT_BLOCKED$;
+	     LOGIN_ACCOUNT_MESSAGE = ' ';
+	     
+	     
+	     
+	     /* WRITE NEW RECORD (NEW ACCOUNT) INTO LOGIN_DATA FILE */
+	     CALL WRITE_NEW_RECORD_LOGIN_DATA(STRING(LOGIN_INPUT_STRUCTURE));
+	     
+	END CREATE_A_NEW_USER_ACCOUNT;
+	
+	/* CHECK IF THIS USER EXISTS IN LOGIN_DATA FILE */
+	
+	CHECK_IF_USER_EXISTS: PROC(USER_LOGIN) RETURNS(BIT(1));
+				
+		ON ENDFILE(LOGIN_DATA) 
+			LOGIN_EOF = '1'B;
+			
+		DECLARE 1 LOGIN_INPUT_STRUCTURE,
+		 	   2 LOGIN_LOGIN CHAR(40),
+		 	   2 LOGIN_PASSWORD CHAR(30),
+		 	   2 LOGIN_ACCOUNT_TYPE CHAR(1),
+		 	   2 LOGIN_ACCOUNT_BLOCKED CHAR(1),
+		 	   2 LOGIN_ACCOUNT_MESSAGE CHAR(38);
+		 	   	
+		DECLARE USER_LOGIN CHAR(40);
+  		DECLARE LOGIN_EOF BIT(1) INIT('0'B);
+  		DECLARE LOGIN_INPUT_TEMP  CHAR(110) INIT(' ');
+  		DECLARE LOGIN_DATA FILE STREAM INPUT;
+  		  
+		OPEN FILE(LOGIN_DATA) TITLE('marketplace_login_data.txt');
+		
+		GET FILE(LOGIN_DATA)  EDIT(LOGIN_INPUT_TEMP)(A(110));
+		
+		READLOOP: DO UNTIL(LOGIN_EOF);  
+
+		    STRING(LOGIN_INPUT_STRUCTURE) = LOGIN_INPUT_TEMP;		    		     	 	    	
+  	 	    	  	 	    	     				  	 	    	
+		    IF (LOGIN_INPUT_STRUCTURE.LOGIN_LOGIN = USER_LOGIN) THEN
+		    DO;
+		    	CLOSE FILE(LOGIN_DATA);
+		    	RETURN(YES$);
+		    END;
+		    ELSE
+	               GET FILE(LOGIN_DATA) EDIT(LOGIN_INPUT_TEMP)(A(110));			
+	           
+		END READLOOP;
+		CLOSE FILE(LOGIN_DATA);
+		RETURN(NO$); /* USER DOES NOT EXIST */
+		  	
+	END CHECK_IF_USER_EXISTS;
+	
+	
+	/*------------------------------------------------------------------------------*/
+	/*                                                                              */
+	/*  Get user credentials                                                        */
+	/*                                                                              */
+	/*------------------------------------------------------------------------------*/	
+	GET_VALIDATE_CREDENTIALS: PROC;
+					 	
+		DECLARE INPUT_PASSWORD CHAR(30) VARYING;
+		DECLARE INPUT_LOGIN    CHAR(40) VARYING;
+		
+		DISPLAY('Please provide your login: ') REPLY(INPUT_LOGIN);	
+		DO WHILE(INPUT_LOGIN = ' ');
+			        DISPLAY('') REPLY(INPUT_LOGIN);		
+		END;			
+		DISPLAY('Please provide your password: ') REPLY(INPUT_PASSWORD);			      
+		DO WHILE(INPUT_LOGIN = ' ');
+			        DISPLAY('') REPLY(INPUT_LOGIN);
+		END;
+
+		CALL VALIDATE_CREDENTIALS;
+				
+	
+	
+	        /*--------------------------------------------------------------------------*/
+	        /*     Read credentials file and compare if they match user input;
+	        /*--------------------------------------------------------------------------*/	          
+		VALIDATE_CREDENTIALS: PROC;
+		
+		  DECLARE LOGIN_INPUT_TEMP CHAR(110); 	   
+	
+		  ON ENDFILE(LOGIN_DATA) 
+			LOGIN_EOF = '1'B;
+		
+  		  DECLARE LOGIN_EOF BIT(1) INIT('0'B);
+		
+		  DECLARE LOGIN_DATA FILE STREAM INPUT;
+           
+		  DECLARE 1 LOGIN_INPUT_STRUCTURE,
+		 	   2 LOGIN_LOGIN CHAR(40),
+		 	   2 LOGIN_PASSWORD CHAR(30),
+		 	   2 LOGIN_ACCOUNT_TYPE CHAR(1),
+		 	   2 LOGIN_ACCOUNT_BLOCKED CHAR(1),
+		 	   2 LOGIN_ACCOUNT_MESSAGE CHAR(38);
+		 	   	  	 
+		
+	    	  OPEN file(LOGIN_DATA) TITLE('marketplace_login_data.txt');	
+		  DECLARE USER_FOUND BIT(1) INIT('0'B);
+	
+		  GET FILE(LOGIN_DATA) EDIT(LOGIN_INPUT_TEMP)(A(110));				
+
+                 /*  read until valid credentials found or end of login file */                 		  
+		  READLOOP: DO UNTIL(LOGIN_EOF | USER_FOUND);  
+
+		    STRING(LOGIN_INPUT_STRUCTURE) = LOGIN_INPUT_TEMP;		    		     	 	    	
+  	 	    	
+			  	 	    	
+		    IF (LOGIN_INPUT_STRUCTURE.LOGIN_LOGIN = INPUT_LOGIN
+		    &   LOGIN_INPUT_STRUCTURE.LOGIN_PASSWORD = INPUT_PASSWORD) THEN 
+		    	DO;	
+		       USER_FOUND = YES$;
+		       END;
+		    ELSE
+		    	DO;
+	               GET FILE(LOGIN_DATA) EDIT(LOGIN_INPUT_TEMP)(A(110));			
+	               END;
+	            
+	            
+		  END READLOOP;
+		  
+
+		  /* if correct user has not been found */
+		  IF (LOGIN_EOF & ^USER_FOUND) THEN 		  		
+		  	DO;
+		  	  DISPLAY(MSG_USER_NOT_FOUND);		
+		  	END; 				  	 
+                  ELSE
+                  	DO;
+			  
+		  	 	
+			  /* as program knows that user was identified there is no point in storing its password outside of this */
+			  /* procedure it is now cleared with spaces                                                             */
+		  
+			  USER_VERIFIED = YES$; 
+			  LOGIN_PASSWORD = ' '; 
+			  INPUT_PASSWORD = ' ';
+			  GLB_USER_LOGIN = LOGIN_LOGIN;
+			  GLB_USER_ACCOUNT_TYPE = LOGIN_ACCOUNT_TYPE;
+			  GLB_USER_ACCOUNT_BLOCKED_FLAG = LOGIN_ACCOUNT_BLOCKED;
+			  GLB_USER_ACCOUNT_MESSAGE = LOGIN_ACCOUNT_MESSAGE;
+			  
+                  	END;	
+		   CLOSE FILE(LOGIN_DATA);                  		  	
+		  
+
+		END VALIDATE_CREDENTIALS;
+	END GET_VALIDATE_CREDENTIALS;	
+	NORMAL_USER_PROCESSING: PROC;
+
+		DECLARE VALID_CHOICE   	   BIT(1) INIT('0'B);
+		DECLARE NORMAL_USER_CHOICE	   CHAR(1) INIT(' ');
+		/*          NORMAL USER OPTIONS                            */
+	        DECLARE NORMAL_USER_CHANGE_PASS$           CHAR(1) INIT('1');		
+	        DECLARE NORMAL_USER_MAKE_RESERVATION$      CHAR(1) INIT('2');
+	        DECLARE NORMAL_USER_SEE_YOUR_RESERVATIONS$ CHAR(1) INIT('3');
+	        DECLARE NORMAL_USER_LOG_OFF$               CHAR(1) INIT('4');
+	        
+		
+		DO UNTIL(VALID_CHOICE);
+			CALL PRINT_NORMAL_PROC_OPTIONS; /* Print all options for normal user */
+			
+			DISPLAY(' ');    /* PRINT NEW LINE */
+			NORMAL_USER_CHOICE = '';
+		
+			
+			/* first read of user input with prompt */
+		        DISPLAY((15)' ' || 'Please provide your input and press enter: ')       REPLY(NORMAL_USER_CHOICE);
+
+			/* in case of empty input get value again */
+			DO WHILE(NORMAL_USER_CHOICE = ' ');
+			        DISPLAY('') REPLY(NORMAL_USER_CHOICE);
+			END;
+						
+			
+			DISPLAY('PROVIDED CHOICE: ' || NORMAL_USER_CHOICE);		
+			CALL VALIDATE_NORMAL_PROC_CHOICE(NORMAL_USER_CHOICE); 
+		END;		
+		
+		
+		
+		PRINT_NORMAL_PROC_OPTIONS: PROC;
+		 	DISPLAY((100)'-');
+	 		DISPLAY((10)' ' || 'Choose any option from below: ');
+			DISPLAY((15)' ' || '1. Change password');
+			DISPLAY((15)' ' || '2. Make a new reservation');
+			DISPLAY((15)' ' || '3. See yours reservations');				
+			DISPLAY((15)' ' || '4. Log off');
+			DISPLAY((100)'-');
+		END PRINT_NORMAL_PROC_OPTIONS;
+		VALIDATE_NORMAL_PROC_CHOICE: PROC(USER_CHOICE);
+			DECLARE USER_CHOICE          	CHAR(1);
+			SELECT (USER_CHOICE);
+				WHEN (NORMAL_USER_CHANGE_PASS$);
+					CALL CHANGE_USER_PASSWORD;
+					
+				WHEN (NORMAL_USER_MAKE_RESERVATION$);				
+					CALL MAKE_NEW_RESERVATION();				
+					
+				WHEN (NORMAL_USER_SEE_YOUR_RESERVATIONS$);
+					CALL PRINT_USER_RESERVATION(GLB_USER_LOGIN);			
+					
+				WHEN (NORMAL_USER_LOG_OFF$);					
+					VALID_CHOICE = YES$;							
+				OTHERWISE;
+				DO;
+					DISPLAY(MSG_INVALID_USER_CHOICE);
+				END;
+			END;
+		END;
+		/*--------------------------------------------------------------------------------------------*/
+		/*    print market place data ask user for the spot and range of dates                        */
+		/*--------------------------------------------------------------------------------------------*/		
+		MAKE_NEW_RESERVATION: PROC;
+			ON CONVERSION BEGIN;
+				DISPLAY(MSG_CONVERSION_ERROR);
+				RETURN;
+	
+			END;
+			DECLARE ALL_DATA_VALID BIT(1) INIT('0'B); 
+			
+			DECLARE USER_SPOT_NUMBER_TEMP CHAR(10); 
+			DECLARE USER_SPOT_NUMBER FIXED BIN(31); 
+			DECLARE USER_SPOT_NUMBER_FINAL PIC '999'; 
+			DECLARE USER_START_DATE	CHAR(10);
+			DECLARE USER_END_DATE          CHAR(10);
+			DECLARE DATE_VAL_RESULT        FIXED BIN(31) INIT(0);
+			DECLARE USER_RESERV_DURATION   PIC '999';
+			CALL PRINT_MARKETPLACE_DATA();
+			CALL GET_AND_VALIDATE_RESRV_DATA();
+
+			USER_SPOT_NUMBER_FINAL = USER_SPOT_NUMBER;
+
+
+			CALL ADD_NEW_RESERVATION(GLB_USER_LOGIN, USER_SPOT_NUMBER_FINAL, USER_START_DATE, USER_END_DATE, USER_RESERV_DURATION);
+			
+			
+			GET_AND_VALIDATE_RESRV_DATA: PROC;
+			
+				DATA_VALIDATION: DO UNTIL(ALL_DATA_VALID);
+					DISPLAY('Please provide the spot number: ') REPLY(USER_SPOT_NUMBER_TEMP);
+					DO WHILE(USER_SPOT_NUMBER_TEMP = ' ');
+						DISPLAY('') REPLY(USER_SPOT_NUMBER_TEMP);
+					END; 
+	
+					USER_SPOT_NUMBER = BIN(USER_SPOT_NUMBER_TEMP,31);
+	
+					
+					IF (USER_SPOT_NUMBER < 1
+					|   USER_SPOT_NUMBER > GLB_MAX_SPOT_NUMBER) THEN
+					DO;
+						DISPLAY(MSG_INVALID_SPOT_NUMBER);
+						ITERATE;					
+					END;
+					DISPLAY('Please provide start date of reservation in format yyyy.mm.dd: ') REPLY(USER_START_DATE);
+					DO WHILE(USER_START_DATE = ' ');
+						DISPLAY('') REPLY(USER_START_DATE);
+					END;
+					
+					DISPLAY('Please provide end date of reservation in format yyyy.mm.dd: ') REPLY(USER_END_DATE);
+					DO WHILE(USER_END_DATE = ' ');
+						DISPLAY('') REPLY(USER_END_DATE);
+					END;
+					
+					/* IF RESULT = 0 -> ERROR, ELSE NUMBER OF DAYS BETWEEN DATES */
+					
+					DATE_VAL_RESULT = VALIDATE_DATES(USER_START_DATE,USER_END_DATE);
+										
+					
+					IF (DATE_VAL_RESULT = 0) THEN
+					DO;
+						DISPLAY(MSG_INVALID_DATES_PROVIDED);
+						ITERATE;
+					END;
+					IF (DATE_VAL_RESULT > GLB_MAX_RESERVATION_DURATION) THEN
+					DO;
+						DISPLAY(MSG_DURATION_TO_LONG);
+						ITERATE;
+					END;
+
+					USER_RESERV_DURATION = DATE_VAL_RESULT;		
+
+					/* IF NO ERRORS: */
+					ALL_DATA_VALID = YES$;									
+				END DATA_VALIDATION;
+			END GET_AND_VALIDATE_RESRV_DATA;
+		END MAKE_NEW_RESERVATION ; 
+	END NORMAL_USER_PROCESSING;
+	/*--------------------------------------------------------------------------------------------------*/
+	/*                                     ADMIN USER PROCESSING                                        */
+	/*--------------------------------------------------------------------------------------------------*/	
+	ADMIN_USER_PROCESSING: PROC;
+	        /* DATA DEFINITIONS */
+	        DECLARE ADMIN_USER_CHOICE CHAR(1) INIT(' ');
+      	        DECLARE ADMIN_USER_CHOICE_TEMP CHAR(1) INIT(' ');
+	        DECLARE VALID_CHOICE      BIT(1) INIT('0'B);
+	        /*          ADMIN USER OPTIONS                             */
+	        DECLARE ADMIN_OPTION_CHANGE_PAS$           CHAR(1) INIT('1');
+	        DECLARE ADMIN_OPTION_SEE_ALL_RESRV$        CHAR(1) INIT('2');
+	        DECLARE ADMIN_MANAGE_OTHER_ACCOUNTS$       CHAR(1) INIT('3');
+	        DECLARE ADMIN_OPTION_LOG_OFF$   	     CHAR(1) INIT('4');
+		
+		DO UNTIL(VALID_CHOICE);
+			CALL PRINT_ADMIN_PROC_OPTIONS;
+			
+			DISPLAY(' ');    /* PRINT NEW LINE */
+			ADMIN_USER_CHOICE = '';
+			ADMIN_USER_CHOICE_TEMP =' ';
+			
+			/* first read of user input with prompt */
+		        DISPLAY((15)' ' || 'Please provide your input and press enter: ')       REPLY(ADMIN_USER_CHOICE_TEMP);
+
+			/* in case of empty input get value again */
+			DO WHILE(ADMIN_USER_CHOICE_TEMP = ' ');
+			        DISPLAY('') REPLY(ADMIN_USER_CHOICE_TEMP);
+			END;
+			ADMIN_USER_CHOICE = SUBSTR(ADMIN_USER_CHOICE_TEMP,1,1);
+			
+			DISPLAY('PROVIDED CHOICE: ' || ADMIN_USER_CHOICE);		
+			CALL VALIDATE_ADMIN_PROC_CHOICE; 
+		END;		
+		
+		/* DISPLAY ADMIN USER FUNCTIONS MENU */
+		PRINT_ADMIN_PROC_OPTIONS: PROC;
+		 	DISPLAY((100)'-');
+	 		DISPLAY((10)' ' || 'Choose any option from below: ');
+			DISPLAY((15)' ' || '1. Change password');
+			DISPLAY((15)' ' || '2. Manage all reservations');			
+			DISPLAY((15)' ' || '3. Manage non-admin accounts');
+			DISPLAY((15)' ' || '4. Log off');
+			DISPLAY((100)'-');
+		END PRINT_ADMIN_PROC_OPTIONS;
+		
+		/* VALIDATE CHOICE PROVIDED BY USER */
+		VALIDATE_ADMIN_PROC_CHOICE: PROC;
+		        /* EVALUATE THRU ALL POSSIBLE ADMIN CHOICES */
+			SELECT (ADMIN_USER_CHOICE);
+				WHEN (ADMIN_OPTION_CHANGE_PAS$);
+					CALL CHANGE_USER_PASSWORD;
+								
+					
+				WHEN (ADMIN_OPTION_SEE_ALL_RESRV$);
+					CALL PRINT_USER_RESERVATION(' ');/* SPACE AS A APRAMETER WILL PRINT ALL RESERVATIONS*/
+					CALL PROCESS_RESERVATION_CANCELATION();
+				WHEN (ADMIN_MANAGE_OTHER_ACCOUNTS$);					
+					CALL   ADMIN_MANAGE_OTHER_ACCOUNTS;			
+					
+				WHEN (ADMIN_OPTION_LOG_OFF$ );				
+				DO;												
+					VALID_CHOICE = YES$;
+					 				
+				END;
+				OTHERWISE;
+				DO;
+					DISPLAY(MSG_INVALID_USER_CHOICE);
+				END;
+			END;
+		END VALIDATE_ADMIN_PROC_CHOICE;
+		/*-------------------------------------------------------------------------*/
+		/* ADMIN IS ALLOWED TO PRINT ALL NON-ADMIN USERS                           */
+		/*-------------------------------------------------------------------------*/		
+		ADMIN_MANAGE_OTHER_ACCOUNTS: PROC;
+			DECLARE USER_TABLE(1000) 			CHAR(110);
+			DECLARE 1 LOGIN_INPUT_STRUCTURE,  
+				 	   2 LOGIN_LOGIN 		CHAR(40),
+				 	   2 LOGIN_PASSWORD 		CHAR(30),
+				 	   2 LOGIN_ACCOUNT_TYPE 	CHAR(1),
+				 	   2 LOGIN_ACCOUNT_BLOCKED 	CHAR(1),
+				 	   2 LOGIN_ACCOUNT_MESSAGE 	CHAR(38);
+				 	   
+                       DECLARE ADMIN_INPUT	 			CHAR(40) INIT(' ');
+                       DECLARE USER_COUNTER                        	FIXED BIN(31) INIT(0); 
+                       DECLARE I                                    	FIXED BIN(31) INIT(0);
+                       DECLARE USER_NUMBER                    	FIXED BIN(31) INIT(0);
+                       DECLARE BLOCKADE_REASON_MESSAGE               CHAR(38) INIT(' ');
+                       DECLARE PROCESSING_DONE                       BIT(1) INIT('0'B);
+                       /* ADMIN_LIST_ALL_NON_ADMIN_ACCOUNTS will set USER_COUNTER to number of non-admin users in the system */
+                       CALL ADMIN_LIST_ALL_NON_ADMIN_ACCOUNTS;				 	   
+                       
+                       
+                       UNTIL_VALID: DO UNTIL(PROCESSING_DONE);
+	                       DISPLAY('Please provide user_login of user you want to perform action on, provide x to quit ');
+                       
+        	               DISPLAY('Choice: ') REPLY(ADMIN_INPUT);                     
+        	               
+        	               /* in case of empty input get value again */
+        	               
+				DO WHILE(ADMIN_INPUT = ' ');
+				        DISPLAY('') REPLY(ADMIN_INPUT);
+				END;
+				
+				IF (ADMIN_INPUT = "x" | ADMIN_INPUT = "X" ) THEN
+				DO;
+					DISPLAY('Leaving...');
+					RETURN;
+				END;
+				
+        	               USER_NUMBER = 0;    /* VALUE WILL STORE THE INDEX OF THE TABLE WHERE USER DATA IS STORED*/	     
+        	               USER_NUMBER = VALIDATE_IF_USER_PROVIDED_VALID(ADMIN_INPUT);
+        	               
+        	                  	                      	              
+        	               IF (USER_NUMBER ^= 0) THEN
+        	               DO;
+        	               	DECLARE ADMIN_ACTION_ON_USER_CONFIRMATION  CHAR(1) INIT(' ');
+        	               	DISPLAY('Do you want to block this user: (Y/N) ') REPLY(ADMIN_ACTION_ON_USER_CONFIRMATION);
+        	               	
+        	               	DO WHILE(ADMIN_ACTION_ON_USER_CONFIRMATION = ' ');
+				        	DISPLAY('') REPLY(ADMIN_ACTION_ON_USER_CONFIRMATION);
+				        END;	
+				        
+				        IF (ADMIN_ACTION_ON_USER_CONFIRMATION ^= 'y'
+				          & ADMIN_ACTION_ON_USER_CONFIRMATION ^= 'Y'
+				          & ADMIN_ACTION_ON_USER_CONFIRMATION ^= 'N'
+				          & ADMIN_ACTION_ON_USER_CONFIRMATION ^= 'n') THEN
+				        DO;
+				        	DISPLAY('Invalid choice provided, leaving...');
+				        	RETURN;
+				        END;
+				        IF (ADMIN_ACTION_ON_USER_CONFIRMATION = 'N'
+				          | ADMIN_ACTION_ON_USER_CONFIRMATION = 'n') THEN
+				        DO;  
+				    	 	   DISPLAY('leaving...');
+				    		   RETURN;
+                                       END;				    		   
+				        
+				        
+				        /* If user choose to block this user */
+				        DISPLAY('You will block user ' || ADMIN_INPUT);
+				        DISPLAY('Please provide blockade reason: ') REPLY(BLOCKADE_REASON_MESSAGE);
+				        
+				        DO WHILE(BLOCKADE_REASON_MESSAGE = ' ');
+				        	DISPLAY('') REPLY(BLOCKADE_REASON_MESSAGE);
+				        END;
+				        
+				        /* PRINT CONFIRMATION MESSAGE TO THE USER */
+				        
+				        DISPLAY('User: ' || ADMIN_INPUT 
+				             || ' is to be blocked with ' || BLOCKADE_REASON_MESSAGE  || ' message.');
+				        
+
+				        
+				        STRING(LOGIN_INPUT_STRUCTURE) = USER_TABLE(USER_NUMBER);
+
+				        LOGIN_ACCOUNT_BLOCKED = BLOCKED_ACCOUNT$;
+				        LOGIN_ACCOUNT_MESSAGE = BLOCKADE_REASON_MESSAGE;
+				        
+				        CALL UPDATE_LOGIN_DATA(STRING(LOGIN_INPUT_STRUCTURE), LOGIN_LOGIN, LOGIN_PASSWORD);
+				        	
+				        PROCESSING_DONE = YES$; /* END THE LOOP */
+				        
+				 
+        	               END;
+        	               ELSE
+        	               DO;
+        	               	DISPLAY('User provided is invalid, leaving...');
+        	               	RETURN;
+        	               END;
+                       END UNTIL_VALID;
+                       
+                       
+                       
+			/* PRINT ALL NON ADMIN ACCOUNTS, SUBPROCEDURE */
+			ADMIN_LIST_ALL_NON_ADMIN_ACCOUNTS: PROC;
+				ON ENDFILE(LOGIN_DATA) 
+					LOGIN_EOF = '1'B;
+		
+	  			DECLARE LOGIN_EOF BIT(1) INIT('0'B);
+		
+				DECLARE LOGIN_DATA FILE STREAM INPUT; /* DECLARE INPUT FILE */
+						
+				DECLARE STRNG_ACCOUNT_TYPE     	CHAR(20)  INIT('ACCOUNT TYPE: ');
+				DECLARE STRNG_NORMAL_ACCOUNT 		CHAR(14)  INIT('NORMAL ACCOUNT');
+				DECLARE STRNG_ACCOUNT_BLOCKADE     	CHAR(20)  INIT(' ');
+				DECLARE STRNG_ACCOUNT_IS_BLOCKED	CHAR(20)  INIT('ACCOUNT BLOCKED');
+				DECLARE STRNG_ACCOUNT_IS_ACTIVE	CHAR(20)  INIT('ACCOUNT IS ACTIVE');
+				DECLARE STRNG_ACCOUNT_MESSAGE_IND	CHAR(20)  INIT('ACCOUNT MESSAGE: ');
+				DECLARE STRNG_ACCOUNT_MESSAGE   	CHAR(38)  INIT(' ');
+				DECLARE STRNG_IS_EMPTY       	      	CHAR(5)   INIT('EMPTY');         		
+			 	DECLARE LOGIN_DATA_INPUT             	CHAR(110) INIT(' ');
+           
+				
+
+	                       OPEN FILE(LOGIN_DATA) TITLE('marketplace_login_data.txt');		 	                		    
+	               	GET FILE(LOGIN_DATA) EDIT(LOGIN_DATA_INPUT)(A(110));			               	                      
+	                       I = 0; /* SET ITERATOR TO ZERO*/
+	             		/* READ WHOLE FILE */
+	             		DO UNTIL(LOGIN_EOF);
+	             			I = I+1; /* INCREMENT THE COUNTER */
+					STRING(LOGIN_INPUT_STRUCTURE) = LOGIN_DATA_INPUT;
+					/* SKIP THE RECORD IF IT IS AN ADMIN ACCOUNT */
+					IF (LOGIN_ACCOUNT_TYPE ^= ADMIN_ACCOUNT$) THEN
+					DO;
+						IF (LOGIN_ACCOUNT_BLOCKED = BLOCKED_ACCOUNT$) THEN
+							STRNG_ACCOUNT_BLOCKADE = STRNG_ACCOUNT_IS_BLOCKED;
+						ELSE
+							STRNG_ACCOUNT_BLOCKADE = STRNG_ACCOUNT_IS_ACTIVE;
+						IF (LOGIN_ACCOUNT_MESSAGE = ' ') THEN
+							STRNG_ACCOUNT_MESSAGE = STRNG_IS_EMPTY;
+						ELSE
+							STRNG_ACCOUNT_MESSAGE = LOGIN_ACCOUNT_MESSAGE;
+												
+						DISPLAY(LOGIN_LOGIN    
+						   ||  ' '
+						   ||  STRNG_ACCOUNT_TYPE
+						   ||  STRNG_NORMAL_ACCOUNT
+						   ||  ' '
+						   ||  STRNG_ACCOUNT_BLOCKADE
+						   ||  ' '
+						   ||  STRNG_ACCOUNT_MESSAGE_IND
+						   ||  STRNG_ACCOUNT_MESSAGE);
+						
+					 	USER_TABLE(I) = STRING(LOGIN_INPUT_STRUCTURE);
+					     
+					END;
+					
+					GET FILE(LOGIN_DATA) EDIT(LOGIN_DATA_INPUT)(A(110));				       
+		  		END;
+             			USER_COUNTER = I; /* SAVE THE NUMBER OF USERS */
+	             		CLOSE FILE(LOGIN_DATA);
+             		END ADMIN_LIST_ALL_NON_ADMIN_ACCOUNTS;
+             		
+             		/* CHECK IF USER PROVIDED BY THE ADMIN USER IS CORRECT OR IT IS AN  VALUE */
+             		VALIDATE_IF_USER_PROVIDED_VALID: PROC(PROVIDED_VALUE) RETURNS(FIXED BIN(31));
+             			DECLARE PROVIDED_VALUE 	CHAR(40);
+             			
+             			DECLARE ITER 			FIXED BIN(31) INIT(1);             		
+             			DO ITER=1 TO USER_COUNTER;
+             				STRING(LOGIN_INPUT_STRUCTURE) = USER_TABLE(ITER);
+             				IF (LOGIN_LOGIN = PROVIDED_VALUE) THEN  
+             				DO; 
+             					DISPLAY('INSIDE THE CORRECT VALIDATION iter: ' || ITER);          				
+             					RETURN(ITER);
+             				END;
+             				
+             			END;
+             			/* IF PROGRAM CONTROL GETS HERE PROVIDED VALUE IS INVALID*/
+             			RETURN(0);
+             			
+             			
+             		END VALIDATE_IF_USER_PROVIDED_VALID;	 	   
+		END ADMIN_MANAGE_OTHER_ACCOUNTS;
+		/*-------------------------------------------------------------------------------------*/
+		/* PROCESS CANCELATION OF THE RESERVATION                                              */
+		/* ADMIN HAS TO PROVIDE, SPOT, USER_NAME, START AND END DATE                           */
+		/*-------------------------------------------------------------------------------------*/
+		PROCESS_RESERVATION_CANCELATION: PROC;
+			DECLARE RESERV_DATA_CORRECT 		BIT(1) INIT('0'B);
+			DECLARE INPUT_USER_NAME 		CHAR(40) INIT(' ');
+			DECLARE INPUT_SPOT_NUMBER_TEMP 	CHAR(3) INIT(' ');
+			DECLARE INPUT_SPOT_NUMBER   		FIXED BIN(31) INIT(0);
+			DECLARE INPUT_SPOT_NUMBER_FINAL     	PIC '999';
+			DECLARE INPUT_START_DATE   		CHAR(10);
+			DECLARE INPUT_END_DATE 		CHAR(10);
+			DECLARE INPUT_REC_TABLE(1000)        	CHAR(66);
+			DECLARE RECORD_COUNT               	FIXED BIN(31) INIT(0);
+			DECLARE RESERV_FOUND                	BIT(1) INIT('0'); /* WILL BE TRUE IF RESERVATION EXISTS */
+			DECLARE RESRV_DATA_CORRECT             BIT(1) INIT('0'B);
+			DECLARE ADMIN_RESV_CHOICE              CHAR(1) INIT(' ');
+			DISPLAY('Do you wish to cancel an reservation: (Y/N): ') REPLY(ADMIN_RESV_CHOICE);
+			
+			DO WHILE(ADMIN_RESV_CHOICE = ' ');
+				DISPLAY('') REPLY(ADMIN_RESV_CHOICE);
+			END;
+			
+			IF (ADMIN_RESV_CHOICE = 'N' | ADMIN_RESV_CHOICE = 'n') THEN
+			DO;
+				DISPLAY('Leaving...');
+				RETURN;
+			END;
+			
+			IF (ADMIN_RESV_CHOICE ^= 'y' & ADMIN_RESV_CHOICE ^= 'Y') THEN
+			DO;
+				DISPLAY(MSG_INVALID_RESV_OPTION);
+				RETURN;				
+			END;
+			RESRV_DATA_CORRECT= NO$;
+			DO UNTIL(RESRV_DATA_CORRECT);
+				DISPLAY('Please provide resrvations user_name: ') REPLY(INPUT_USER_NAME);
+				DO WHILE(INPUT_USER_NAME = ' ');
+					DISPLAY('') REPLY(INPUT_USER_NAME);
+				END;
+				IF(INPUT_USER_NAME = ' ' 
+				 | INPUT_USER_NAME= "X" 
+				 | INPUT_USER_NAME = "x") THEN
+				DO;
+					DISPLAY('user_name invalid');
+					ITERATE;
+				END;
+				
+				DISPLAY('Please provide spot number: ') REPLY(INPUT_SPOT_NUMBER_TEMP);
+				DO WHILE(INPUT_SPOT_NUMBER_TEMP = ' ');
+					DISPLAY('') REPLY(INPUT_SPOT_NUMBER_TEMP);
+				END;
+				
+				INPUT_SPOT_NUMBER = BIN(INPUT_SPOT_NUMBER_TEMP,31);
+				IF(INPUT_SPOT_NUMBER < 1
+				 | INPUT_SPOT_NUMBER > GLB_MAX_SPOT_NUMBER) THEN
+				DO;
+					DISPLAY('user_name invalid');
+					ITERATE;
+				END;
+				INPUT_SPOT_NUMBER_FINAL = INPUT_SPOT_NUMBER; /* CONVERT TO PIC */
+				DISPLAY('PLEASE PROVIDE START DATE: ') REPLY(INPUT_START_DATE);
+				DO WHILE(INPUT_START_DATE = ' ');
+					DISPLAY('') REPLY(INPUT_START_DATE);
+				END;
+				DISPLAY('PLEASE PROVIDE END DATE: ') REPLY(INPUT_END_DATE);
+				DO WHILE(INPUT_END_DATE = ' ');
+					DISPLAY('') REPLY(INPUT_END_DATE);
+				END;
+				
+				RESRV_DATA_CORRECT  = YES$;
+			END;
+			/* THIS PROCEDURE WILL FIND A RECORD IN QUESTION AND CREATE */
+			/* A TABLE WITH ALL THE RECORDS                             */
+				
+			CALL  PREPARE_TABLE_FIND_RECORD();
+			
+			IF (^RESERV_FOUND) THEN
+			DO;
+				DISPLAY(MSG_RESRV_NOT_FOUND);
+				DISPLAY('Leaving...');
+				RETURN;
+			END;
+			
+			/* IF RESERVATION HAS BEEN FOUND THEN WRITE A TABLE TO THE FILE */
+			
+			CALL WRITE_TABLE_TO_RESRV_FILE;
+			
+			
+			PREPARE_TABLE_FIND_RECORD: PROC;
+				ON ENDFILE(RESERV_FILE) 
+					RESERV_FILE_EOF = '1'B;
+					
+				DECLARE ITER 			FIXED BIN(31) INIT(0);	
+	  			DECLARE LOGIN_RESERV_FILE_EOF BIT(1) INIT('0'B);
+	  			DECLARE 1 INPUT_RESERVATION_STRUCTURE,
+					  2 IN_RESERV_SPOT       CHAR(3),
+					  2 IN_RESERV_USER_NAME  CHAR(40),
+					  2 IN_RESERV_START_DATE CHAR(10),
+					  2 IN_RESERV_END_DATE   CHAR(10),
+					  2 IN_RESRV_DURATION    CHAR(3);
+				DECLARE INPUT_RESRV_TEMP         CHAR(66);					  
+		
+				DECLARE RESERV_FILE FILE STREAM INPUT; /* DECLARE INPUT FILE */ 
+				
+				OPEN FILE(RESERV_FILE) TITLE('marketplace_reservations.txt');		 	                		    
+	               	ITER = 0;
+	               	GET FILE(RESERV_FILE) EDIT(INPUT_RESRV_TEMP)(A(66));	
+	               	
+				DO UNTIL(RESERV_FILE_EOF);
+					ITER = ITER+1;
+					STRING(INPUT_RESERVATION_STRUCTURE) = INPUT_RESRV_TEMP;
+
+																							
+										
+					IF (IN_RESERV_SPOT = INPUT_SPOT_NUMBER_FINAL
+					 & IN_RESERV_USER_NAME =INPUT_USER_NAME
+					 & IN_RESERV_START_DATE = INPUT_START_DATE
+					 &  IN_RESERV_END_DATE = INPUT_END_DATE) THEN 
+					 DO; 
+					 	RESERV_FOUND = YES$;
+					  	ITER = ITER-1; /* THIS RECORD DOES NOT COUNT*/
+						GET FILE(RESERV_FILE) EDIT(INPUT_RESRV_TEMP) (A(66));
+						/* THIS RESERVATION IS NOT WRITTEN TO THE TABLE */
+						ITERATE; /* SKIP TO NEXT ITERATION*/
+					 END;
+					
+					INPUT_REC_TABLE(ITER) = STRING(INPUT_RESERVATION_STRUCTURE);
+					GET FILE(RESERV_FILE) EDIT(INPUT_RESRV_TEMP)(A(66));	
+				END;
+				
+				RECORD_COUNT = ITER; /* SET THE NUMBER OF RESERVATIONS */
+				
+				CLOSE FILE(RESERV_FILE);
+			END;
+			
+			/* WRITE ALL RESERVATIONS TO THE RESERVATION FILE */
+			/* WITH OUT THE CANNCELLED ONE DUH                */
+			WRITE_TABLE_TO_RESRV_FILE: PROC;
+			
+				DECLARE ITER		FIXED BIN(31) INIT(0);
+				DECLARE RESERV_FILE_OUT FILE STREAM OUTPUT;
+				OPEN FILE(RESERV_FILE_OUT) TITLE('marketplace_reservations.txt');
+				
+				
+				DO ITER = 1 TO RECORD_COUNT;
+					DISPLAY('IN WRITING TO RESERVATION');
+					PUT SKIP(1) FILE(RESERV_FILE_OUT) EDIT(INPUT_REC_TABLE(ITER))(A(66));
+				END;
+				CLOSE FILE(RESERV_FILE_OUT);			
+				DISPLAY(MSG_SUCCESSFUL_CANCELATION);
+
+			END WRITE_TABLE_TO_RESRV_FILE;
+		END PROCESS_RESERVATION_CANCELATION;
+	END ADMIN_USER_PROCESSING;
+	
+	
+	CHANGE_USER_PASSWORD: PROC;
+	
+		DECLARE LOGIN_INPUT_TEMP CHAR(110); 	 
+			 
+	
+		ON ENDFILE(LOGIN_DATA) 
+			LOGIN_EOF = '1'B;
+		
+  		DECLARE LOGIN_EOF BIT(1) INIT('0'B);
+		
+		DECLARE LOGIN_DATA FILE STREAM INPUT;
+           
+		DECLARE 1 LOGIN_INPUT_STRUCTURE,
+		 	   2 LOGIN_LOGIN CHAR(40),
+		 	   2 LOGIN_PASSWORD CHAR(30),
+		 	   2 LOGIN_ACCOUNT_TYPE CHAR(1),
+		 	   2 LOGIN_ACCOUNT_BLOCKED CHAR(1),
+		 	   2 LOGIN_ACCOUNT_MESSAGE CHAR(38);
+		 	   	  	 
+		
+	    	
+	 
+	        DECLARE USER_FOUND BIT(1) INIT('0'B);
+		DECLARE OLD_PASSWORD 		CHAR(30) INIT(' ');
+		DECLARE NEW_PASSWORD 		CHAR(30) INIT(' ');		
+		DECLARE INPUT_PASSWORD_VALID   BIT(1) INIT('0'B);
+		
+		
+		/* PASSWORD INITIALIZATION */
+		OLD_PASSWORD = ' ';
+		NEW_PASSWORD = ' ';
+		DO UNTIL(INPUT_PASSWORD_VALID);
+
+			DISPLAY((10)' ' || 'Please provide your old password: ') REPLY (OLD_PASSWORD);
+			DO WHILE(OLD_PASSWORD = ' ');
+				        DISPLAY('') REPLY(OLD_PASSWORD);
+			END;
+			
+			DISPLAY((10)' ' || 'Please provide your new password: ') REPLY (NEW_PASSWORD);	
+			DO WHILE(NEW_PASSWORD = ' ');
+				        DISPLAY('') REPLY(NEW_PASSWORD);
+			END;
+			
+			/* password validation */
+			IF (OLD_PASSWORD = NEW_PASSWORD) THEN 			
+				DISPLAY(MSG_ERR_OLD_AND_NEW_PASSWORD_EQUAL);					
+			ELSE
+				IF (OLD_PASSWORD = ' ' | NEW_PASSWORD = ' ') THEN 
+					DISPLAY(MSG_ERR_PASSWORD_INVALID);
+				ELSE				
+					INPUT_PASSWORD_VALID = YES$; /* END THE LOOP */
+													
+		END;
+						
+		DISPLAY ('VALID PASSWORDS WERE PREVIDED');
+		DISPLAY ('OLD: ' || OLD_PASSWORD);
+		DISPLAY ('NEW: ' || NEW_PASSWORD);		
+		
+		
+		OPEN FILE(LOGIN_DATA) TITLE('marketplace_login_data.txt');
+		LOGIN_EOF = NO$;
+		USER_FOUND = NO$;
+		/* READ LOGIN DATA UNTIL USER IS FOUND */ 
+		GET FILE(LOGIN_DATA) EDIT(LOGIN_INPUT_TEMP)(A(110));				
+
+
+		READLOOP: DO UNTIL(LOGIN_EOF | USER_FOUND);  
+			
+		    STRING(LOGIN_INPUT_STRUCTURE) = LOGIN_INPUT_TEMP;
+  			  
+		    IF (LOGIN_INPUT_STRUCTURE.LOGIN_LOGIN = GLB_USER_LOGIN
+		    &   LOGIN_INPUT_STRUCTURE.LOGIN_PASSWORD = OLD_PASSWORD) THEN 
+		       USER_FOUND = YES$;
+		    ELSE
+		    	DO;
+	               GET FILE(LOGIN_DATA) EDIT(LOGIN_INPUT_TEMP)(A(110));			
+	               END;
+	             
+		END READLOOP;
+		IF (LOGIN_EOF & ^USER_FOUND) THEN
+		DO;
+			DISPLAY(MSG_PASS_CHANGE_FAIL_USER_NFND);
+			CLOSE FILE(LOGIN_DATA);
+			RETURN;
+		END;	
+		
+		 
+		LOGIN_INPUT_STRUCTURE.LOGIN_PASSWORD=NEW_PASSWORD;
+		LOGIN_INPUT_TEMP   = STRING(LOGIN_INPUT_STRUCTURE);
+		
+		CLOSE FILE(LOGIN_DATA);
+		
+		/* MODULE WILL READ WHOLE LOGIN_DATA AND  CREATE AN UPDATED COPY */ 
+		
+		CALL UPDATE_LOGIN_DATA (LOGIN_INPUT_TEMP, GLB_USER_LOGIN, OLD_PASSWORD);
+		 
+	
+	END CHANGE_USER_PASSWORD;
+	/* Procedure reads whole LOGIN_DATA file into a table and writes an updated record */ 
+	
+	UPDATE_LOGIN_DATA: PROC(NEW_RECORD_DATA, USER_LOGIN, USER_PASSWORD);
+		/* INPUT PARAMETERS */
+		
+		DISPLAY('UPDATE LOGIN_DATA CALLED');
+		DECLARE NEW_RECORD_DATA 	CHAR(110);
+		DECLARE USER_LOGIN 		CHAR(40);
+		DECLARE USER_PASSWORD 		CHAR(30);
+		
+		DECLARE LOGIN_INPUT_TEMP CHAR(110); 	 
+		
+		DECLARE READ_COUNT             FIXED BIN(31) INIT(0);			 
+	
+		ON ENDFILE(LOGIN_DATA) 
+			LOGIN_EOF = '1'B;
+		
+  		DECLARE LOGIN_EOF BIT(1) INIT('0'B);
+		
+		DECLARE LOGIN_DATA FILE STREAM INPUT; /* DECLARE INPUT FILE */
+		
+		DECLARE LOGIN_DATA_OUT FILE STREAM OUTPUT;  /* DECLARE OUTPUT FILE */ 
+           
+		DECLARE 1 LOGIN_INPUT_STRUCTURE,
+		 	   2 LOGIN_LOGIN CHAR(40),
+		 	   2 LOGIN_PASSWORD CHAR(30),
+		 	   2 LOGIN_ACCOUNT_TYPE CHAR(1),
+		 	   2 LOGIN_ACCOUNT_BLOCKED CHAR(1),
+		 	   2 LOGIN_ACCOUNT_MESSAGE CHAR(38);
+		/* TABLE BELOW HAS TO HOLD WHOLE LOGIN_DATA INPUT FILE */
+		
+		
+		DECLARE LOGIN_DATA_TABLE(1000) CHAR(110);		 	   
+
+		
+		DECLARE I	FIXED BIN(31) INIT(0); 	   	  	 
+		 	   	  	 
+              	LOGIN_EOF = NO$;  /* NOT END OF FILE */ 		 
+              		   	  	 
+		OPEN FILE(LOGIN_DATA) TITLE('marketplace_login_data.txt');
+		READ_COUNT = 0;
+		GET FILE(LOGIN_DATA)  EDIT(LOGIN_INPUT_TEMP)(A(110));	
+			
+		READLOOP: DO WHILE(^LOGIN_EOF);  
+		    READ_COUNT = READ_COUNT + 1; /* INCREMENT NUMBER OF RECORDS read */
+		    DISPLAY('INSISDE READLOOP');		
+			
+		    STRING(LOGIN_INPUT_STRUCTURE) = LOGIN_INPUT_TEMP;
+  			  
+  			 		  
+		    IF (LOGIN_INPUT_STRUCTURE.LOGIN_LOGIN = USER_LOGIN
+		    &   LOGIN_INPUT_STRUCTURE.LOGIN_PASSWORD = USER_PASSWORD) THEN 
+                       LOGIN_DATA_TABLE(READ_COUNT) = NEW_RECORD_DATA;
+		    ELSE
+		    	LOGIN_DATA_TABLE(READ_COUNT) = LOGIN_INPUT_TEMP;
+		    	
+		    DISPLAY(LOGIN_DATA_TABLE(READ_COUNT));	
+
+		    GET FILE(LOGIN_DATA)  EDIT(LOGIN_INPUT_TEMP)(A(110));
+		    
+		END READLOOP;
+		
+
+		CLOSE FILE(LOGIN_DATA);
+
+
+		
+		/* IN THIS MOMENT LOGIN_DATA_TABLE TABLE STORES ALL THE RECORDS FROM LOGIN_DATA FILE     */
+		/* INCLUDING THE NEW VERSION OF THE RECORD THAT IS TO BE UPDATED                         */
+		OPEN FILE(LOGIN_DATA_OUT) TITLE('marketplace_login_data.txt');
+ 
+		DO I = 1 TO READ_COUNT;
+
+			PUT SKIP FILE(LOGIN_DATA_OUT) EDIT(LOGIN_DATA_TABLE(I))(A(110));
+		END;
+		
+	 	CLOSE FILE(LOGIN_DATA_OUT);
+		DISPLAY(MSG_LOGIN_DATA_UPDATED_CORRECT);
+	END UPDATE_LOGIN_DATA;
+	
+	WRITE_NEW_RECORD_LOGIN_DATA: PROC(INPUT_DATA);
+		ON ENDFILE(LOGIN_DATA_IN) 
+			LOGIN_EOF = '1'B;
+		
+  		DECLARE LOGIN_EOF BIT(1) INIT('0'B);
+		DECLARE INPUT_DATA 		CHAR(110);
+		DECLARE INPUT_TEMP             CHAR(110);
+		DECLARE LOGIN_DATA_TABLE(1000) CHAR(110);
+		DECLARE LOGIN_DATA_IN FILE STREAM INPUT;
+		DECLARE LOGIN_DATA_OUT FILE STREAM OUTPUT;
+		DECLARE ITER  			FIXED BIN(31) INIT(1);
+		DECLARE RECORD_COUNT      	FIXED BIN(31) INIT(0);
+		
+		OPEN FILE(LOGIN_DATA_IN) TITLE('marketplace_login_data.txt');
+		DISPLAY('AFTER OPEN');
+		GET FILE(LOGIN_DATA_IN) EDIT(INPUT_TEMP)(A(110));
+		
+		ITER = 0;
+		DO UNTIL(LOGIN_EOF);
+			ITER = ITER + 1;
+			LOGIN_DATA_TABLE(ITER) = INPUT_TEMP;
+			GET FILE(LOGIN_DATA_IN) EDIT(INPUT_TEMP)(A(110));
+		END;	
+		RECORD_COUNT = ITER;
+		/* Here all records from the file should be inside the table */
+		
+		/* ADD NEW RECORD TO THE TABLE */ 
+		RECORD_COUNT  = RECORD_COUNT+1; /* ADD THE RECORD AT THE END OF THE TABLE */ 
+		
+		LOGIN_DATA_TABLE(RECORD_COUNT) = INPUT_DATA;
+		CLOSE FILE(LOGIN_DATA_IN);
+		OPEN FILE(LOGIN_DATA_OUT) TITLE('marketplace_login_data.txt');
+		
+		DO ITER=1 TO RECORD_COUNT;
+			PUT FILE(LOGIN_DATA_OUT) SKIP EDIT(LOGIN_DATA_TABLE(ITER))(A(110));
+		END;
+		
+		CLOSE FILE(LOGIN_DATA_OUT);
+		
+		DISPLAY(MSG_NEW_ACCOUNT_ADDED);
+		
+	END WRITE_NEW_RECORD_LOGIN_DATA;
+	/*------------------------------------------------------------------------------------*/
+	/*       PRINT MARKETPLACE LAYOUT AND INFORMATION ABOUT EACH SPOT                     */
+	/*------------------------------------------------------------------------------------*/	
+	
+	PRINT_MARKETPLACE_DATA: PROC;
+		ON ENDFILE(LAYOUT_FILE)
+			LAYOUT_FILE_EOF = YES$;
+		ON ENDFILE(SPOTS_FILE)
+			SPOTS_FILE_EOF = YES$;
+		DECLARE LAYOUT_FILE_EOF  	BIT(1) INIT('0'B);
+		DECLARE SPOTS_FILE_EOF  	BIT(1) INIT('0'B);		
+		DECLARE LAYOUT_INPUT_RECORD  	CHAR(70) INIT(' ');
+		DECLARE SPOTS_INPUT_RECORD   	CHAR(40) INIT(' ');
+		DECLARE LAYOUT_FILE FILE INPUT STREAM; 
+		DECLARE SPOTS_FILE  FILE INPUT STREAM; 
+		
+		DECLARE 1 SPOTS_INPUT_STRUCTURE,
+		 	  2 SPOT_NUMBER 	CHAR(3),
+		 	  2 SPOT_SQ_METERS 	CHAR(15),
+		 	  2 SPOT_PRIZE_PER_DAY	CHAR(22);
+		
+		
+		OPEN FILE(LAYOUT_FILE) TITLE('marketplace_layout.txt');
+		
+		DISPLAY(MSG_BEFORE_MARKETPLACE_LAYOUT);
+		GET FILE(LAYOUT_FILE) EDIT(LAYOUT_INPUT_RECORD)(A(70));
+		DO UNTIL(LAYOUT_FILE_EOF);
+			DISPLAY(LAYOUT_INPUT_RECORD); 
+			GET FILE(LAYOUT_FILE) EDIT(LAYOUT_INPUT_RECORD)(A(70));
+		END;
+		CLOSE FILE(LAYOUT_FILE);
+		
+		
+		OPEN FILE(SPOTS_FILE) TITLE('marketplace_spots.txt');
+		
+		DISPLAY(MSG_BEFORE_MARKETPLACE_SPOTS);
+		GET FILE(SPOTS_FILE) EDIT(SPOTS_INPUT_RECORD)(A(40));
+		
+		DO UNTIL(SPOTS_FILE_EOF);
+			STRING(SPOTS_INPUT_STRUCTURE) = SPOTS_INPUT_RECORD;
+			
+			DISPLAY('Spot number: ' 
+				|| SPOT_NUMBER
+				|| ' Spot size: '
+				|| SPOT_SQ_METERS
+				|| ' Spot prize: '
+				|| SPOT_PRIZE_PER_DAY);
+				
+			GET FILE(SPOTS_FILE) EDIT(SPOTS_INPUT_RECORD)(A(40));
+		END;
+		CLOSE FILE(SPOTS_FILE);
+				
+	END;
+	/*---------------------------------------------------------------------*/ 	
+	/*  VALIDATE THAT BOTH DATES ARE CORRECT END_DATE MUST BE > START_DATE */
+	/* FUNCTION RETURNS ZERO IF ANY ERROR IS ENCOUNTERED                   */
+	/* IF BOTH DATES ARE VALID FUNCTION RETURNS NUMBER OF DAYS BETWEEN     */
+	/* THOSE DATES, IF START_DATE = END_DATE IT RETURNS 1                  */
+	/*---------------------------------------------------------------------*/ 
+	 
+	VALIDATE_DATES: PROC(START_DATE, END_DATE) RETURNS(FIXED BIN(31));
+		DECLARE START_DATE 	CHAR(10);
+		DECLARE END_DATE 	CHAR(10);	
+
+		DECLARE DATE_TXT(2) 	CHAR(10);
+		DECLARE DAY_NUM(2) 	FIXED BIN(31);
+		DECLARE MONTH_DAYS(12) 	FIXED BIN(31) INIT(31,28,31,30,31,30,31,31,30,31,30,31);
+		DECLARE DIGITS 		CHAR(10) INIT('0123456789');
+
+		DECLARE K 		FIXED BIN(31);
+		DECLARE J 		FIXED BIN(31);
+		DECLARE Y 		FIXED BIN(31);
+		DECLARE M 		FIXED BIN(31);
+		DECLARE D 		FIXED BIN(31);
+		DECLARE P 		FIXED BIN(31);
+		DECLARE MAX_D 		FIXED BIN(31);
+		DECLARE LEAP 		FIXED BIN(31);
+		DECLARE T4 		FIXED BIN(31);
+		DECLARE T100 		FIXED BIN(31);
+		DECLARE T400 		FIXED BIN(31);
+		DECLARE TOTAL 		FIXED BIN(31);
+
+		DATE_TXT(1) = START_DATE;
+		DATE_TXT(2) = END_DATE;
+
+		DO K = 1 TO 2;
+
+			/* FORMAT CHECK: YYYY.MM.DD */
+			IF (SUBSTR(DATE_TXT(K),5,1) ^= '.'
+			  | SUBSTR(DATE_TXT(K),8,1) ^= '.') THEN
+				RETURN (0);
+
+			IF (VERIFY(SUBSTR(DATE_TXT(K),1,4), DIGITS) ^= 0
+			  | VERIFY(SUBSTR(DATE_TXT(K),6,2), DIGITS) ^= 0
+			  | VERIFY(SUBSTR(DATE_TXT(K),9,2), DIGITS) ^= 0) THEN
+			RETURN (0);
+
+			Y = SUBSTR(DATE_TXT(K),1,4);
+			M = SUBSTR(DATE_TXT(K),6,2);
+			D = SUBSTR(DATE_TXT(K),9,2);
+
+			IF (Y < 1 | M < 1 | M > 12 | D < 1) THEN
+				RETURN (0);
+
+			/* LEAP YEAR */
+			LEAP = 0;
+			IF ((MOD(Y,4) = 0 & MOD(Y,100) ^= 0) | MOD(Y,400) = 0) THEN
+				LEAP = 1;
+
+			/* MAX DAY IN MONTH */
+			MAX_D = MONTH_DAYS(M);
+			IF (M = 2) THEN
+				MAX_D = MAX_D + LEAP;
+
+			IF (D > MAX_D) THEN
+				RETURN (0);
+
+			/* DAY NUMBER COUNTED FROM YEAR 1 (EACH TERM TRUNCATED SEPARATELY) */
+			P = Y - 1;
+			T4 = P / 4;
+			T100 = P / 100;
+			T400 = P / 400;
+			TOTAL = P * 365 + T4 - T100 + T400;
+
+			DO J = 1 TO M - 1;
+				TOTAL = TOTAL + MONTH_DAYS(J);
+			END;
+			IF (M > 2) THEN
+		
+				TOTAL = TOTAL + LEAP;
+				DAY_NUM(K) = TOTAL + D;
+			END;
+			
+			DECLARE CURRENT_DATE_TXT 	CHAR(10);
+			DECLARE DT 			CHAR(17);
+
+			DT = DATETIME();
+
+			CURRENT_DATE_TXT = SUBSTR(DT,1,4) || '.' ||
+		                   SUBSTR(DT,5,2) || '.' ||
+		                   SUBSTR(DT,7,2);
+
+			IF (START_DATE < CURRENT_DATE_TXT) THEN
+				RETURN (0);  /* reservation cannot be made in the past */ 
+
+
+			/* END DATE MUST NOT BE BEFORE START DATE */
+			IF (DAY_NUM(2) < DAY_NUM(1)) THEN
+				RETURN (0);
+
+			/* START = END GIVES 1, OTHERWISE DIFFERENCE + 1 (BOTH DAYS COUNTED) */
+			RETURN (DAY_NUM(2) - DAY_NUM(1) + 1);
+
+		END VALIDATE_DATES;
+		ADD_NEW_RESERVATION: PROC(USER_LOGIN, SPOT_NUMBER, START_DATE, END_DATE, DURATION_DAYS);
+			DECLARE USER_LOGIN CHAR(40);
+			DECLARE SPOT_NUMBER CHAR(3);
+			DECLARE START_DATE CHAR(10);
+			DECLARE END_DATE CHAR(10);
+			DECLARE DURATION_DAYS CHAR(3);
+
+			DECLARE IF_CONFLICT  BIT(1) INIT('0'B);			
+			DECLARE RESERV_TABLE(1000)       CHAR(66); /* TABLE STORES ALL THE RESERVATIONS */
+			DECLARE RESERV_COUNT             FIXED BIN(31) INIT(0); /* AMOUNT OF RESERVATIONS IN SYSTEM */
+			DECLARE ITER FIXED BIN(31);
+			DECLARE 1 INPUT_RESERVATION_STRUCTURE,
+					  2 IN_RESERV_SPOT       CHAR(3),
+					  2 IN_RESERV_USER_NAME  CHAR(40),
+					  2 IN_RESERV_START_DATE CHAR(10),
+					  2 IN_RESERV_END_DATE   CHAR(10),
+					  2 IN_RESRV_DURATION    CHAR(3);
+					  
+			DISPLAY(' IN ADDING NEW RESERVATION');
+			
+					
+			IF_CONFLICT = NO$;
+			IF_CONFLICT =  CHECK_IF_CONFLICTING_RESV_EXIST(SPOT_NUMBER,START_DATE,END_DATE);
+
+
+			IF (IF_CONFLICT) THEN
+			DO;
+				DISPLAY(MSG_RESERVATION_CONFLICT);
+				RETURN;
+			END;
+			
+			/* HERE WE KNOW THERE WAS NO CONFLICT AND WE HAVE ALL RESERVATIONS IN THE TABLE*/
+			
+			CALL WRITE_NEW_RESERVATION_TO_FILE;
+			
+			
+			/* CHECK IF THERE IS ANY EXISTSING RESERVATION WITH CONFLICTING DATES */
+			CHECK_IF_CONFLICTING_RESV_EXIST: PROC(SPOT_NUMBER,START_DATE,END_DATE) RETURNS(BIT(1));
+				ON ENDFILE(RESERV_FILE)
+					RESERV_FILE_EOF = YES$;
+					
+				DECLARE RESERV_FILE_EOF	BIT(1) INIT('0'B);
+				DECLARE SPOT_NUMBER 		CHAR(3); 
+				DECLARE START_DATE 		CHAR(10);
+				DECLARE END_DATE 		CHAR(10); 
+				
+				
+				  
+				DECLARE INPUT_RESERV_TEMP        CHAR(66) INIT(' ');
+
+			
+				DECLARE RESERV_FILE FILE INPUT STREAM;
+			
+				OPEN FILE(RESERV_FILE) TITLE('marketplace_reservations.txt');
+				RESERV_COUNT = 0;
+			
+				GET FILE(RESERV_FILE) EDIT(INPUT_RESERV_TEMP)(A(66));
+				
+				
+				
+				
+				DO UNTIL(RESERV_FILE_EOF);	
+					RESERV_COUNT = RESERV_COUNT + 1; 
+					STRING(INPUT_RESERVATION_STRUCTURE) = INPUT_RESERV_TEMP; 
+					
+										
+					IF (START_DATE <= IN_RESERV_END_DATE 
+					  & END_DATE >= IN_RESERV_START_DATE
+					  & SPOT_NUMBER = IN_RESERV_SPOT) THEN
+					DO; /* CONFLICT */
+
+					    CLOSE FILE(RESERV_FILE);
+					    RETURN(YES$); /* RETURN INFO ABOUT CONFLICT*/
+					END;
+					
+					RESERV_TABLE(RESERV_COUNT) = INPUT_RESERV_TEMP; /*SAVE ALL RESERVATIONS*/
+					
+					GET FILE(RESERV_FILE) EDIT(INPUT_RESERV_TEMP)(A(66));	
+				END;
+					
+				CLOSE FILE(RESERV_FILE);
+				RETURN(NO$);
+			END CHECK_IF_CONFLICTING_RESV_EXIST;	
+			
+			/* WRITE NEWLY CREATED RESERVATION TO THE FILE */ 
+			
+			WRITE_NEW_RESERVATION_TO_FILE: PROC;
+
+
+				DECLARE ITER FIXED BIN(31) INIT(0);
+				 				 
+				DECLARE RESERV_FILE_OUT FILE OUTPUT STREAM;
+				OPEN FILE(RESERV_FILE_OUT) TITLE('marketplace_reservations.txt');
+														
+				DO ITER=1 TO RESERV_COUNT;
+					PUT SKIP FILE(RESERV_FILE_OUT) EDIT(RESERV_TABLE(ITER)) (A(66));					
+				END;
+				STRING(INPUT_RESERVATION_STRUCTURE) = ' '; /* INITIALIZE THE STRUCTURE */ 
+				IN_RESERV_SPOT = SPOT_NUMBER;
+				IN_RESERV_USER_NAME = GLB_USER_LOGIN;
+				IN_RESERV_START_DATE = START_DATE;
+				IN_RESERV_END_DATE = END_DATE;
+				IN_RESRV_DURATION = DURATION_DAYS;
+				
+				
+				PUT SKIP FILE(RESERV_FILE_OUT) EDIT(STRING(INPUT_RESERVATION_STRUCTURE))(A(66));
+								
+				CLOSE FILE(RESERV_FILE_OUT);
+			END;
+		END ADD_NEW_RESERVATION;
+		/*---------------------------------------------------------------------------------------*/
+		/* PRINTING USER RESERVATIONS -> IF USER_LOGIN IS PROVIDED                               */
+		/* IF USER_LOGIN = ' ' THEN PRINT ALL RESERVATIONS IN THE SYSTEM                         */
+		/*---------------------------------------------------------------------------------------*/				
+		PRINT_USER_RESERVATION: PROC(USER_LOGIN);
+		
+			ON ENDFILE(RESERV_FILE)
+				RESERV_FILE_EOF = YES$;
+					
+			DECLARE RESERV_FILE_EOF	BIT(1) INIT('0'B);
+			DECLARE USER_LOGIN 	CHAR(40);
+			DECLARE 1 INPUT_RESERVATION_STRUCTURE,
+					  2 IN_RESERV_SPOT       CHAR(3),
+					  2 IN_RESERV_USER_NAME  CHAR(40),
+					  2 IN_RESERV_START_DATE CHAR(10),
+					  2 IN_RESERV_END_DATE   CHAR(10),
+					  2 IN_RESRV_DURATION    CHAR(3);
+			DECLARE INPUT_RESERV_TEMP      CHAR(66);		  			
+			DECLARE PRINT_IT               BIT(1) INIT('0'B);
+		
+			DECLARE RESERV_FILE FILE STREAM INPUT;
+		
+			OPEN FILE(RESERV_FILE) TITLE('marketplace_reservations.txt');
+			
+			GET FILE(RESERV_FILE) EDIT(INPUT_RESERV_TEMP)(A(66));
+			
+			
+			DO UNTIL(RESERV_FILE_EOF);
+				STRING(INPUT_RESERVATION_STRUCTURE) = INPUT_RESERV_TEMP;
+				
+				PRINT_IT = '0'B;
+				
+				IF (USER_LOGIN = ' ') THEN
+					PRINT_IT = '1'B;
+				IF (USER_LOGIN = IN_RESERV_USER_NAME) THEN
+					PRINT_IT = '1'B;	
+					
+				IF(PRINT_IT) THEN
+				DO;
+					DISPLAY('Spot: ' || IN_RESERV_SPOT 
+					||     ' for user: ' || IN_RESERV_USER_NAME
+					||     ' start date: ' || IN_RESERV_START_DATE
+					||     ' end date: ' || IN_RESERV_END_DATE
+					||     ' how many days: ' || IN_RESRV_DURATION);
+					
+				END;
+				GET FILE(RESERV_FILE) EDIT(INPUT_RESERV_TEMP)(A(66));
+			END;
+			
+			CLOSE FILE(RESERV_FILE);
+		END PRINT_USER_RESERVATION;
+		
+	 
+	
+END MAIN;
